@@ -1,16 +1,17 @@
 import streamlit as st
 import pandas as pd
 import requests
-from serpapi import GoogleSearch
-from bs4 import BeautifulSoup
 import re
+from io import BytesIO
 
-# 🗝️ API KEY
+st.set_page_config(page_title="Buscador de Productos", layout="wide")
+
 API_KEY = "c564bcfd30dc7e38f22ab9ac05511b434b5cb9b523d4203c3d56568f3301a6bf"
 
-# 🧱 SUPERLISTA DE MARCAS
 marcas_conocidas = [
-    "Foset","omega","Omega","Conduit", "Rotoplas", "Coflex", "RUGO", "IUSA", "Amanco Wavin", "Cinsa", "Calorex", "Helvex", "Urrea",
+    "Foset", "Rotoplas", "Coflex", "IUSA", "Helvex", "Urrea", "Oatey", "Weld-On", "Truper", "Contact",
+    "Siler", "FXN", "Ezweld", "Christy's", "Presto", "Rain-R-Shine", "Surtek", "Rali", "MINIPIT",
+    "Silverplastic", "Wetweld", "Foset","omega","Omega","Conduit", "Rotoplas", "Coflex", "RUGO", "IUSA", "Amanco Wavin", "Cinsa", "Calorex", "Helvex", "Urrea",
     "Oatey", "Tubo Plus", "Dica", "Optimus", "Hesa", "Tatsa", "Eureka", "Conducto", "Ledes", "Atkore", "ABB",
     "Kohler", "Moen", "Delta Faucet", "Grohe", "American Standard", "TOTO", "Geberit", "Hansgrohe", "Roca",
     "Brizo", "Pfister", "Jacuzzi", "Sloan", "Gerber", "CRH", "Saint-Gobain", "Lowe’s", "Zurn", "Elkay",
@@ -32,45 +33,15 @@ marcas_conocidas = [
     "GAF", "Firestone Building Products", "IKO", "Owens Corning", "Johns Manville", "Knauf", "CertainTeed",
     "Kingspan", "USG", "Lafarge", "National Gypsum", "Georgia-Pacific", "Armstrong", "Contact", "Siler",
     "FXN", "Ezweld", "Christy's", "Presto", "Rain-R-Shine", "Surtek", "Truper", "Rali", "MINIPIT",
-    "Silverplastic", "Wetweld", "Weld-On"
+    "Silverplastic", "Wetweld", "Weld-On","Fluidmaster"
 ]
 
-frases_excluir = ["the home depot", "mercado libre", "sodimac", "amazon", "linio", "elektra", "uber eats"]
-
-# 🔍 Scraper de respaldo
-def detectar_marca_scraping(url):
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
-            return 'Sin marca'
-        soup = BeautifulSoup(response.content, 'html.parser')
-        contenido = ' '.join(soup.stripped_strings).lower()
-        for marca in marcas_conocidas:
-            if marca.lower() in contenido:
-                return marca
-        return 'Sin marca'
-    except:
-        return 'Sin marca'
-
-# 🎯 Detección completa con orden de prioridad
-def detectar_marca_completa(titulo, product_brand, source, link):
-    if product_brand and product_brand.strip().lower() != "unknown":
-        return product_brand.strip()
-
-    titulo_clean = titulo.lower()
-    for palabra in frases_excluir:
-        titulo_clean = titulo_clean.replace(palabra, "")
-
+def detectar_marca_completa(titulo, fuente, link):
+    texto = f"{titulo} {fuente} {link}".lower()
     for marca in marcas_conocidas:
-        if marca.lower() in titulo_clean:
+        if marca.lower() in texto:
             return marca
-
-    fuente = f"{source} {link}".lower()
-    for marca in marcas_conocidas:
-        if marca.lower() in fuente:
-            return marca
-
-    return detectar_marca_scraping(link)
+    return "Sin marca"
 
 def limpiar_precio(valor):
     if isinstance(valor, str):
@@ -81,58 +52,101 @@ def limpiar_precio(valor):
             return None
     return valor
 
-def buscar_producto(query):
+def es_mayoreo(texto):
+    palabras = ['pzas', 'paquete', 'kit', 'caja', 'mayoreo', 'set', 'combo', 'x unidades']
+    return any(p in texto.lower() for p in palabras)
+
+def mostrar_estadisticas(df, titulo):
+    df['PrecioNum'] = df['Precio'].apply(limpiar_precio)
+    resumen = df.groupby("Marca")["PrecioNum"].agg(["count", "mean", "median", "std"]).round(2)
+    resumen = resumen.rename(columns={"count": "Cantidad", "mean": "Promedio", "median": "Mediana", "std": "DesvEstándar"})
+    resumen['Promedio'] = resumen['Promedio'].apply(lambda x: f"${x:,.2f}")
+    resumen['Mediana'] = resumen['Mediana'].apply(lambda x: f"${x:,.2f}")
+    resumen['DesvEstándar'] = resumen['DesvEstándar'].apply(lambda x: f"{x:,.2f}")
+    st.subheader(titulo)
+    st.dataframe(resumen)
+    return resumen
+
+def mostrar_resultados(df, titulo):
+    df = df.copy()
+    df['Ver producto'] = df['Link'].apply(lambda x: f'[Ver producto]({x})')
+    df = df.drop(columns=['Link'])
+    st.subheader(titulo)
+    st.dataframe(df)
+    return df
+
+def obtener_productos(descripcion, marca):
+    query = f"{descripcion} {marca}"
     params = {
         "engine": "google_shopping",
         "q": query,
+        "api_key": API_KEY,
         "hl": "es",
-        "gl": "mx",
-        "api_key": API_KEY
+        "gl": "mx"
     }
-    search = GoogleSearch(params)
-    results = search.get_dict()
-    productos = results.get("shopping_results", [])
-
+    response = requests.get("https://serpapi.com/search", params=params)
+    results = response.json().get("shopping_results", [])
     data = []
-    for p in productos:
-        titulo = p.get("title", "")
-        marca = detectar_marca_completa(
-            titulo,
-            p.get("product_brand"),
-            p.get("source", ""),
-            p.get("link", "")
-        )
+    for item in results:
+        titulo = item.get("title", "")
+        precio = item.get("price", "")
+        tienda = item.get("source", "")
+        link = item.get("link", "")
+        marca_detectada = item.get("product_brand", "") or detectar_marca_completa(titulo, tienda, link)
         data.append({
             "Producto": titulo,
-            "Marca": marca,
-            "Precio": p.get("price"),
-            "Tienda": p.get("source"),
-            "Link": p.get("link")
+            "Marca": marca_detectada,
+            "Precio": precio,
+            "Tienda": tienda,
+            "Link": link
         })
     return pd.DataFrame(data)
 
-# 🚀 STREAMLIT INTERFAZ
-st.set_page_config(page_title="Buscador de Precios", layout="wide")
-st.title("🛍️ Buscador de Productos - Google Shopping")
+def clasificar_coincidencias(df, modelo):
+    df = df.copy()
+    df['Coincidencia'] = df['Producto'].apply(lambda x: 'Exacto' if modelo.lower() in x.lower() else 'Similar')
+    return df
 
-query = st.text_input("¿Qué producto deseas buscar?", placeholder="Ej: cemento para PVC")
+def convertir_a_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
 
-if query:
-    st.write(f"🔍 Buscando: **{query}**...")
-    df = buscar_producto(query)
+# UI
+st.title("🔍 Buscador de Productos")
 
-    if df.empty:
-        st.warning("⚠️ No se encontraron productos.")
+modo = st.radio("Selecciona el modo de búsqueda:", ["General", "Específica"])
+descripcion = st.text_input("📝 Descripción:")
+marca = st.text_input("🏷️ Marca:")
+modelo = st.text_input("🔢 Modelo:")
+dimension = st.text_input("📏 Dimensión:")
+
+if st.button("Buscar"):
+    if not descripcion or not marca:
+        st.warning("La descripción y la marca son obligatorias.")
     else:
-        df["PrecioNum"] = df["Precio"].apply(limpiar_precio)
-        st.dataframe(df[["Producto", "Marca", "Precio", "Tienda", "Link"]])
+        df = obtener_productos(descripcion, marca)
+        df = df[~df['Producto'].apply(es_mayoreo)].copy()
 
-        resumen = df.groupby("Marca")["PrecioNum"].agg(["mean", "median", "std"]).round(2)
-        resumen = resumen.rename(columns={"mean": "Promedio", "median": "Mediana", "std": "DesvEstándar"})
+        if df.empty:
+            st.info("No se encontraron productos.")
+        elif modo == "General":
+            mostrar_resultados(df, "🛒 Resultados Generales")
+            resumen = mostrar_estadisticas(df, "📊 Estadísticas Generales")
+            st.download_button("⬇️ Descargar Resultados", convertir_a_csv(df), "resultados_generales.csv", "text/csv")
+            st.download_button("⬇️ Descargar Estadísticas", convertir_a_csv(resumen), "estadisticas_generales.csv", "text/csv")
 
-        st.subheader("📊 Estadísticas por Marca")
-        st.dataframe(resumen)
+        elif modo == "Específica":
+            df = clasificar_coincidencias(df, modelo)
+            exactos = df[df['Coincidencia'] == 'Exacto']
+            similares = df[df['Coincidencia'] == 'Similar']
 
-        # Botón de descarga
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Descargar Productos", data=csv, file_name='productos.csv', mime='text/csv')
+            if not exactos.empty:
+                df1 = mostrar_resultados(exactos, "✅ Coincidencias Exactas")
+                res1 = mostrar_estadisticas(exactos, "📊 Estadísticas Exactas")
+                st.download_button("⬇️ Descargar Exactos", convertir_a_csv(df1), "exactos.csv", "text/csv")
+                st.download_button("⬇️ Descargar Estadísticas Exactos", convertir_a_csv(res1), "estadisticas_exactos.csv", "text/csv")
+
+            if not similares.empty:
+                df2 = mostrar_resultados(similares, "🔄 Coincidencias Similares")
+                res2 = mostrar_estadisticas(similares, "📊 Estadísticas Similares")
+                st.download_button("⬇️ Descargar Similares", convertir_a_csv(df2), "similares.csv", "text/csv")
+                st.download_button("⬇️ Descargar Estadísticas Similares", convertir_a_csv(res2), "estadisticas_similares.csv", "text/csv")
