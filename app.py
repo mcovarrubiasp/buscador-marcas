@@ -99,7 +99,16 @@ def filtrar_uso_adaptativo(texto, uso_deseado):
     palabras_deseadas = categorias_de_uso.get(uso_deseado, [])
     palabras_conflictivas = [
         palabra
-        for categoria
+        for categoria, palabras in categorias_de_uso.items()
+        if categoria != uso_deseado
+        for palabra in palabras
+    ]
+
+    if any(palabra in texto for palabra in palabras_deseadas):
+        return True
+    if any(palabra in texto for palabra in palabras_conflictivas):
+        return False
+    return True
 
  # Filtro por dimensión en pulgadas
 def filtrar_por_dimension_robusta(texto, dimension_deseada):
