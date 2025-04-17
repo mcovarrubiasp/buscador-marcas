@@ -174,6 +174,9 @@ def obtener_productos(query):
 
 # Función para filtrar resultados según los criterios
 def filtrar_resultados(df, modelo, uso, dimension, longitud):
+    if df.empty or "Producto" not in df.columns or "Tienda" not in df.columns:
+        return df
+
     df_filtrado = df.copy()
     df_filtrado['Texto'] = df_filtrado['Producto'].str.lower() + ' ' + df_filtrado['Tienda'].str.lower()
 
@@ -189,7 +192,7 @@ def filtrar_resultados(df, modelo, uso, dimension, longitud):
     if longitud:
         df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_por_longitud(x, longitud))]
 
-    df_filtrado = df_filtrado.drop(columns=['Texto'])
+    df_filtrado = df_filtrado.drop(columns=['Texto'], errors='ignore')
     return df_filtrado
 
 # Función para convertir DataFrame a CSV
