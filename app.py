@@ -175,9 +175,13 @@ def obtener_productos(query):
 # Función para filtrar resultados según los criterios
 def filtrar_resultados(df, modelo, uso, dimension, longitud):
     if df.empty or "Producto" not in df.columns or "Tienda" not in df.columns:
-        return df
+        return pd.DataFrame()  # Retornar vacío seguro
 
     df_filtrado = df.copy()
+
+    # Aseguramos que 'Producto' y 'Tienda' no tengan nulos
+    df_filtrado["Producto"] = df_filtrado["Producto"].fillna("")
+    df_filtrado["Tienda"] = df_filtrado["Tienda"].fillna("")
     df_filtrado['Texto'] = df_filtrado['Producto'].str.lower() + ' ' + df_filtrado['Tienda'].str.lower()
 
     if modelo:
