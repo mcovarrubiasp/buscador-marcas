@@ -2,12 +2,14 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-from io import BytesIO
 
+# Configuración de la página
 st.set_page_config(page_title="Buscador de Productos", layout="wide")
 
+# API Key de SerpAPI
 API_KEY = "c564bcfd30dc7e38f22ab9ac05511b434b5cb9b523d4203c3d56568f3301a6bf"
 
+# Diccionario de marcas conocidas
 marcas_conocidas = [
     "Foset", "Rotoplas", "Coflex", "IUSA", "Helvex", "Urrea", "Oatey", "Weld-On", "Truper", "Contact",
     "Siler", "FXN", "Ezweld", "Christy's", "Presto", "Rain-R-Shine", "Surtek", "Rali", "MINIPIT",
@@ -36,13 +38,51 @@ marcas_conocidas = [
     "Silverplastic", "Wetweld", "Weld-On","Fluidmaster"
 ]
 
+# Diccionario de categorías de uso
+categorias_de_uso = {
+    "lavabo": ["lavabo", "baño", "lavamanos", "lavamaní", "fregadero"],
+    "boiler": ["boiler", "calentador", "caldera", "termotanque"],
+    "refrigerador": ["refrigerador", "frigorífico", "nevera", "heladera"],
+    "sanitario": ["sanitario", "inodoro", "wc", "taza", "retrete", "excusado", "cisterna"],
+    "ducha": ["ducha", "regadera", "shower", "cabezal de ducha", "maneral"],
+    "cocina": ["cocina", "tarja", "fregadero", "grifería de cocina", "mezcladora cocina"],
+    "mingitorio": ["mingitorio", "urinal"],
+    "instalación": ["instalación", "tubería", "conexión", "acople", "válvula", "unión", "plomería", "ensamble"],
+    "construcción": ["obra", "construcción", "materiales", "prefabricado", "cemento", "pegamento", "bloque", "aditivo"],
+    "industrial": ["industrial", "alta presión", "uso rudo", "uso intensivo"],
+    "general": ["multiuso", "universal", "compatible", "doméstico", "residencial"]
+}
+
+# Diccionario de dimensiones equivalentes
+dimensiones_equivalentes = {
+    '1/2"': ["1/2", "0.5", '½', "1.27cm", "1.2 cm", "1,27 cm"],
+    '3/4"': ["3/4", "0.75", "¾", "1.9cm", "1.91 cm"],
+    '1"': ["1", "2.54 cm", "2,5cm"],
+    '1 1/2"': ["1 1/2", "1.5", "1½", "3.8 cm", "3.81cm"],
+    '2"': ["2", "5.08 cm", "5cm", "5,1cm"],
+    '3"': ["3", "7.6cm", "7.62 cm"],
+    '4"': ["4", "10 cm", "10.1 cm", "10.16cm"],
+    '6"': ["6", "15.2 cm", "15.24cm"],
+    '8"': ["8", "20.3 cm", "20.32cm"]
+}
+
+# Generar dimensiones métricas comunes
+centimetros = [f"{i} cm" for i in range(5, 105, 5)] + [f"{i}cm" for i in range(5, 105, 5)]
+metros = [f"{i} m" for i in range(1, 101)] + [f"{i}m" for i in range(1, 101)]
+metros_en_cm = [f"{i * 100} cm" for i in range(1, 101)] + [f"{i*100}cm" for i in range(1, 101)]
+dimensiones_metricas_equivalentes = list(set(centimetros + metros + metros_en_cm))
+
+# Función para detectar marca
 def detectar_marca_completa(titulo, fuente, link):
-    texto = f"{titulo} {fuente} {link}".lower()
+    titulo = titulo.lower()
+    fuente = fuente.lower()
+    link = link.lower()
     for marca in marcas_conocidas:
-        if marca.lower() in texto:
+        if marca.lower() in titulo or marca.lower() in fuente or marca.lower() in link:
             return marca
     return "Sin marca"
 
+# Limpieza de precio
 def limpiar_precio(valor):
     if isinstance(valor, str):
         valor = valor.replace("$", "").replace(",", "")
@@ -52,31 +92,52 @@ def limpiar_precio(valor):
             return None
     return valor
 
-def es_mayoreo(texto):
-    palabras = ['pzas', 'paquete', 'kit', 'caja', 'mayoreo', 'set', 'combo', 'x unidades']
-    return any(p in texto.lower() for p in palabras)
+# Filtro por uso
+def filtrar_uso_adaptativo(texto, uso_deseado):
+    texto = texto.lower()
+    uso_deseado = uso_deseado.lower()
+    palabras_deseadas = categorias_de_uso.get(uso_deseado, [])
+    palabras_conflictivas = [
+        palabra
+        for categoria
 
-def mostrar_estadisticas(df, titulo):
-    df['PrecioNum'] = df['Precio'].apply(limpiar_precio)
-    resumen = df.groupby("Marca")["PrecioNum"].agg(["count", "mean", "median", "std"]).round(2)
-    resumen = resumen.rename(columns={"count": "Cantidad", "mean": "Promedio", "median": "Mediana", "std": "DesvEstándar"})
-    resumen['Promedio'] = resumen['Promedio'].apply(lambda x: f"${x:,.2f}")
-    resumen['Mediana'] = resumen['Mediana'].apply(lambda x: f"${x:,.2f}")
-    resumen['DesvEstándar'] = resumen['DesvEstándar'].apply(lambda x: f"{x:,.2f}")
-    st.subheader(titulo)
-    st.dataframe(resumen)
-    return resumen
+ # Filtro por dimensión en pulgadas
+def filtrar_por_dimension_robusta(texto, dimension_deseada):
+    texto = texto.lower()
+    if not dimension_deseada:
+        return True
 
-def mostrar_resultados(df, titulo):
-    df = df.copy()
-    df['Ver producto'] = df['Link'].apply(lambda x: f'[Ver producto]({x})')
-    df = df.drop(columns=['Link'])
-    st.subheader(titulo)
-    st.dataframe(df)
-    return df
+    formas_deseadas = dimensiones_equivalentes.get(dimension_deseada, [])
+    formas_otros = [
+        variante
+        for key, variantes in dimensiones_equivalentes.items()
+        if key != dimension_deseada
+        for variante in variantes
+    ]
 
-def obtener_productos(descripcion, marca):
-    query = f"{descripcion} {marca}"
+    if any(forma in texto for forma in formas_deseadas):
+        return True
+    if any(forma in texto for forma in formas_otros):
+        return False
+    return True
+
+# Filtro por longitud métrica
+def filtrar_por_longitud(texto, longitud_deseada):
+    texto = texto.lower()
+    if not longitud_deseada:
+        return True
+
+    deseada = longitud_deseada.lower().strip()
+    if deseada in texto:
+        return True
+
+    otras_longitudes = [l for l in dimensiones_metricas_equivalentes if l != deseada]
+    if any(l in texto for l in otras_longitudes):
+        return False
+    return True
+
+# Función para obtener productos desde SerpAPI
+def obtener_productos(query):
     params = {
         "engine": "google_shopping",
         "q": query,
@@ -102,51 +163,73 @@ def obtener_productos(descripcion, marca):
         })
     return pd.DataFrame(data)
 
-def clasificar_coincidencias(df, modelo):
-    df = df.copy()
-    df['Coincidencia'] = df['Producto'].apply(lambda x: 'Exacto' if modelo.lower() in x.lower() else 'Similar')
-    return df
+# Función para filtrar resultados según los criterios
+def filtrar_resultados(df, modelo, uso, dimension, longitud):
+    df_filtrado = df.copy()
+    df_filtrado['Texto'] = df_filtrado['Producto'].str.lower() + ' ' + df_filtrado['Tienda'].str.lower()
 
+    if modelo:
+        df_filtrado = df_filtrado[df_filtrado['Texto'].str.contains(modelo.lower())]
+
+    if uso:
+        df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_uso_adaptativo(x, uso))]
+
+    if dimension:
+        df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_por_dimension_robusta(x, dimension))]
+
+    if longitud:
+        df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_por_longitud(x, longitud))]
+
+    df_filtrado = df_filtrado.drop(columns=['Texto'])
+    return df_filtrado
+
+# Función para convertir DataFrame a CSV
 def convertir_a_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-# UI
+# Función para reiniciar la búsqueda
+def reiniciar_busqueda():
+    st.session_state.descripcion = ""
+    st.session_state.marca = ""
+    st.session_state.modelo = ""
+    st.session_state.dimension = ""
+    st.session_state.uso = ""
+    st.session_state.longitud = ""
+
+# Interfaz de usuario
 st.title("🔍 Buscador de Productos")
 
-modo = st.radio("Selecciona el modo de búsqueda:", ["General", "Específica"])
-descripcion = st.text_input("📝 Descripción:")
-marca = st.text_input("🏷️ Marca:")
-modelo = st.text_input("🔢 Modelo:")
-dimension = st.text_input("📏 Dimensión:")
+descripcion = st.text_input("📝 Descripción:", key="descripcion")
+marca = st.text_input("🏷️ Marca:", key="marca")
+modelo = st.text_input("🔢 Modelo:", key="modelo")
+dimension = st.text_input("📏 Dimensión (pulgadas):", key="dimension")
+longitud = st.text_input("📐 Longitud (cm o m):", key="longitud")
+uso = st.text_input("🔧 Uso:", key="uso")
 
-if st.button("Buscar"):
-    if not descripcion or not marca:
-        st.warning("La descripción y la marca son obligatorias.")
-    else:
-        df = obtener_productos(descripcion, marca)
-        df = df[~df['Producto'].apply(es_mayoreo)].copy()
+col1, col2 = st.columns([1, 1])
+with col1:
+    if st.button("🔍 Buscar"):
+        if not descripcion or not marca:
+            st.warning("Por favor, ingresa al menos la descripción y la marca.")
+        else:
+            query = f"{descripcion} {marca}"
+            df = obtener_productos(query)
+            df_filtrado = filtrar_resultados(df, modelo, uso, dimension, longitud)
+            if not df_filtrado.empty:
+                df_filtrado['Ver producto'] = df_filtrado['Link'].apply(lambda x: f'[Ver producto]({x})')
+                df_filtrado = df_filtrado.drop(columns=['Link'])
+                st.dataframe(df_filtrado)
+                csv = convertir_a_csv(df_filtrado)
+                st.download_button(
+                    label="📥 Descargar resultados",
+                    data=csv,
+                    file_name='resultados.csv',
+                    mime='text/csv',
+                )
+            else:
+                st.info("No se encontraron resultados con los criterios proporcionados.")
 
-        if df.empty:
-            st.info("No se encontraron productos.")
-        elif modo == "General":
-            mostrar_resultados(df, "🛒 Resultados Generales")
-            resumen = mostrar_estadisticas(df, "📊 Estadísticas Generales")
-            st.download_button("⬇️ Descargar Resultados", convertir_a_csv(df), "resultados_generales.csv", "text/csv")
-            st.download_button("⬇️ Descargar Estadísticas", convertir_a_csv(resumen), "estadisticas_generales.csv", "text/csv")
+with col2:
+    if st.button("🔄 Reiniciar búsqueda"):
+        reiniciar_busqueda()
 
-        elif modo == "Específica":
-            df = clasificar_coincidencias(df, modelo)
-            exactos = df[df['Coincidencia'] == 'Exacto']
-            similares = df[df['Coincidencia'] == 'Similar']
-
-            if not exactos.empty:
-                df1 = mostrar_resultados(exactos, "✅ Coincidencias Exactas")
-                res1 = mostrar_estadisticas(exactos, "📊 Estadísticas Exactas")
-                st.download_button("⬇️ Descargar Exactos", convertir_a_csv(df1), "exactos.csv", "text/csv")
-                st.download_button("⬇️ Descargar Estadísticas Exactos", convertir_a_csv(res1), "estadisticas_exactos.csv", "text/csv")
-
-            if not similares.empty:
-                df2 = mostrar_resultados(similares, "🔄 Coincidencias Similares")
-                res2 = mostrar_estadisticas(similares, "📊 Estadísticas Similares")
-                st.download_button("⬇️ Descargar Similares", convertir_a_csv(df2), "similares.csv", "text/csv")
-                st.download_button("⬇️ Descargar Estadísticas Similares", convertir_a_csv(res2), "estadisticas_similares.csv", "text/csv")
