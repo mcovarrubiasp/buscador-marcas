@@ -175,14 +175,20 @@ def obtener_productos(query):
 # Función para filtrar resultados según los criterios
 def filtrar_resultados(df, modelo, uso, dimension, longitud):
     if df.empty or "Producto" not in df.columns or "Tienda" not in df.columns:
-        return pd.DataFrame()  # Retornar vacío seguro
+        return pd.DataFrame()
 
     df_filtrado = df.copy()
 
-    # Aseguramos que 'Producto' y 'Tienda' no tengan nulos
+    # Limpieza para evitar nulos
     df_filtrado["Producto"] = df_filtrado["Producto"].fillna("")
     df_filtrado["Tienda"] = df_filtrado["Tienda"].fillna("")
-    df_filtrado['Texto'] = df_filtrado['Producto'].str.lower() + ' ' + df_filtrado['Tienda'].str.lower()
+
+    # Crear columna auxiliar
+    try:
+        df_filtrado['Texto'] = df_filtrado['Producto'].str.lower() + ' ' + df_filtrado['Tienda'].str.lower()
+    except Exception as e:
+        print("❌ Error al crear columna Texto:", e)
+        return df_filtrado
 
     if modelo:
         df_filtrado = df_filtrado[df_filtrado['Texto'].str.contains(modelo.lower())]
@@ -194,10 +200,13 @@ def filtrar_resultados(df, modelo, uso, dimension, longitud):
         df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_por_dimension_robusta(x, dimension))]
 
     if longitud:
-        df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_por_longitud(x, longitud))]
+        if 'Texto' in df_filtrado.columns:
+            df_filtrado = df_filtrado[df_filtrado['Texto'].apply(lambda x: filtrar_por_longitud(x, longitud))]
 
+    # Limpieza final
     df_filtrado = df_filtrado.drop(columns=['Texto'], errors='ignore')
     return df_filtrado
+
 
 # Función para convertir DataFrame a CSV
 def convertir_a_csv(df):
