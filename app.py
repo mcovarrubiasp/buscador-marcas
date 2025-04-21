@@ -128,9 +128,3 @@ Evalúa cuáles cumplen y por qué, y da una explicación final sobre qué produ
         st.markdown(respuesta)
 """
 
-# Guardar el archivo
-mistral_file_path = "/mnt/data/app_gpt_mistral.py"
-with open(mistral_file_path, "w") as file:
-    file.write(streamlit_mistral_script)
-
-mistral_file_path
