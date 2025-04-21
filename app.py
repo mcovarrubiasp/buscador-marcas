@@ -107,7 +107,7 @@ if st.button("Buscar"):
 
     st.markdown(f"**🔍 Lógica aplicada:** {explicacion}")
 
-       with st.spinner("🧠 Analizando con inteligencia artificial..."):
+    with st.spinner("🧠 Analizando con inteligencia artificial..."):
         resumen_prompt = f"""
 Actúa como un agente de compras experto. El usuario está buscando lo siguiente:
 Producto: {producto}
