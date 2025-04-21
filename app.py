@@ -1,5 +1,3 @@
-# Crear el contenido actualizado del archivo app.py con integración a Hugging Face (Mistral-7B)
-streamlit_mistral_script = """
 import streamlit as st
 import pandas as pd
 import requests
@@ -126,5 +124,4 @@ Evalúa cuáles cumplen y por qué, y da una explicación final sobre qué produ
         respuesta = razonamiento_gpt(resumen_prompt)
         st.markdown("### 🤖 Razonamiento IA")
         st.markdown(respuesta)
-"""
 
